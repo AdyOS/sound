@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <link rel="stylesheet" type="text/css" href="css/bootstrap.css"/>
+  <link rel="stylesheet" type="text/css" href="css/jplayer.blue.monday.css"/>
+  <script type="text/javascript" src="js/jquery-1.8.0.min.js"></script>
+  <script type="text/javascript" src="js/jquery.jplayer.js"></script>
+  <script type="text/javascript" src="js/jplayer.playlist.js"></script>
+  <script type="text/javascript" src="js/jquery.jplayer.inspector.js"></script>
+  <script type="text/javascript" src="js/bootstrap.js"></script>
+  <script type="text/javascript" src="js/json2.js"></script>
+  <script type="text/javascript" src="js/openapi.js"></script>
+  <script type="text/javascript">
+
+  var _token = '';
+  var _oldHash = '';
+    $(document).ready(function () {
+      pocketPlayer = {
+        playList:new jPlayerPlaylist({
+              jPlayer:"#jquery_jplayer_1",
+              cssSelectorAncestor:"#jp_container_1"
+            }, {
+              swfPath:"js",
+              supplied:"oga, mp3",
+              wmode:"window"
+            },
+            {
+              play:function (event) {
+                pocketPlayer.setTitle();
+                pocketPlayer.onplay();
+                // debugger;
+                // $(this.cssSelector.jPlayer).jPlayer("play");
+              }
+            }
+        ),
+
+        search:{
+          search:function () {
+            pocketPlayer.playList.remove();
+            this.getPlayList();
+          },
+          getPlayList:function () {
+            var _playList = pocketPlayer.playList;
+            if(pocketPlayer._token) {
+              // demo mode
+              var _query = (getUrlVars()[0].length > 0) ? "q=" + getUrlVars()[0] + "&auto_complete=1" : "q=";
+              pocketPlayer.callApi("audio.search", _query, function (res) {
+                pocketPlayer.apiCallback(res);
+              });
+            } else {
+              // extended mode
+              var _query = (getUrlVars()[0].length > 0) ? {q:getUrlVars()[0]} : {q:""};
+              _query.auto_complete = 1;
+              pocketPlayer.callJSApi("audio.search", _query, function (res) {
+                pocketPlayer.apiCallback(res);
+              });
+            }
+/*
+            pocketPlayer.callApi("audio.search", "q=" + _query, function (res) {
+              pocketPlayer.apiCallback(res);
+            });
+*/
+          },
+          lastOffset:0,
+          tabId:"#tab_search",
+          current:0,
+          playlist:[]
+        },
+        _apiURL:'',
+        _token:'',
+        getToken: function() {
+          $.ajax({
+            url: "token.php", //+ '.xml',
+            method:'GET',
+            dataType:"JSON",
+            async: false,
+            data: "proxy",
+            success:function (respond) {
+              if (respond.error) {
+                alert(respond.error);
+              } else {
+                pocketPlayer._token = respond.access_token;
+              }
+            },
+            error:function (err) {
+              alert('Err: ' + err);
+            }
+          });
+        },
+        init:function () {
+          VK.init({
+            apiId: 3121739
+          });
+          this._token = getUrlVars()['access_token'];
+          this._apiURL = "https://api.vk.com/method/";
+          //this.addShowPlayListListener();
+          VK.Auth.getLoginStatus(function callback(resp) {
+            if(resp.session == null) {
+              // пока жостко юзаем токен
+              pocketPlayer.getToken();
+              pocketPlayer.search.getPlayList();
+              // ниже задаем вопрос мол давай через конаткт
+              /*VK.Auth.login(function login_callback(resp) {
+                debugger;
+                if(resp.session && resp.status) {
+                  pocketPlayer.search.getPlayList();
+                }
+              });*/
+            } else {
+              pocketPlayer.search.getPlayList();
+            }
+          });
+          //pocketPlayer.search.getPlayList();
+          //VK.Auth.login();
+        },
+        callApi:function (_api, _query, _callback) {
+          var _activePlayList = this.search,//this.getActivePlayList(),
+              _token = this._token,
+              _apiURL = this._apiURL;
+          if (_query.length > 0) {
+            $.ajax({
+              url:_apiURL + _api, //+ '.xml',
+              method:'POST',
+              dataType:"JSONP",
+              data:_query + "&access_token=" + _token + "&offset=" + _activePlayList.lastOffset
+                  + "&count=10", // + "auto_complete=1",
+              success:function (respond) {
+                if (respond.error) {
+                  alert(respond.error.error_msg);
+                } else {
+                  _callback(respond);
+                  _activePlayList.lastOffset += 10;
+                }
+              },
+              error:function (err) {
+                alert('Err: ' + err);
+              }
+            });
+          }
+        },
+        callJSApi:function (_api, _query, _callback) {
+          var _activePlayList = this.search,
+              _token = this._token,
+              _apiURL = this._apiURL;
+          if (_query) {
+            //"&offset=" + _activePlayList.lastOffset + "&count=10"
+            _query.offset =  _activePlayList.lastOffset;
+            _query.count = 10;
+            VK.Api.call(_api, _query, function (respond) {
+              if (respond.error) {
+                alert(respond.error.error_msg);
+              } else {
+                _callback(respond);
+                _activePlayList.lastOffset += 10;
+              }
+            });
+          }
+        },
+        apiCallback:function (res) {
+          var _json = res.response,
+              _items = [],
+              _appendMode = (this.playList.playlist.length > 0) ? true : false;
+
+          for (var i = 1; i < _json.length; i++) {
+            // если плейлист не пуст, добавляем к нему
+            if (_appendMode) {
+              this.playList.add({
+                title:_json[i].artist + ' - ' + _json[i].title,
+                mp3:_json[i].url
+              });
+            } else {
+              _items.push({
+                title:_json[i].artist + ' - ' + _json[i].title,
+                mp3:_json[i].url});
+            }
+          }
+          if (!_appendMode) {
+            this.playList.setPlaylist(_items);
+          }
+        },
+        onplay:function () {
+          var _activePlayList = this.search;
+          if (this.playList.playlist.length - this.playList.current == 1) {
+            _activePlayList.getPlayList();
+          }
+        },
+        setTitle:function () {
+          // вынетсти в переменную!!!! менять на show в табе
+          var _activePlayList = this;//.getActivePlayList();
+          $("#current_play_title").text(_activePlayList.playList.playlist[_activePlayList.playList.current].title);
+          $(function () {
+            var marquee = $("#current_play_title");
+            marquee.css({"overflow":"hidden", "width":"100%"});
+            // wrap "My Text" with a span (IE doesn't like divs inline-block)
+            marquee.wrapInner("<span>");
+            marquee.find("span").css({ "width":"50%", "display":"inline-block", "text-align":"center" });
+            marquee.append(marquee.find("span").clone()); // now there are two spans with "My Text"
+
+            marquee.wrapInner("<div>");
+            marquee.find("div").css("width", "200%");
+
+            var reset = function () {
+              $(this).css({"margin-left":"0%"});
+              $(this).animate({ "margin-left":"-100%" }, 13000, 'linear', reset);
+            };
+
+            reset.call(marquee.find("div"));
+
+          });
+        }
+      };
+      $("#tab_user_playlist").hide();
+      if (getUrlVars()[0] && getUrlVars()[0].length > 0) {
+        _oldHash = getUrlVars()[0];
+        _token = getUrlVars()['access_token'];
+        pocketPlayer.init();
+        //pocketPlayer.search.getPlayList();
+        //UNCOMMENT!!!!
+      pocketPlayer.playList.options.playlistOptions.autoPlay = true;
+      }
+    });
+
+  setInterval(checkURL, 2000);
+
+  function checkURL() {
+    var _newHash = getUrlVars()[0];
+    if(_oldHash != _newHash) {
+      _oldHash = _newHash;
+      pocketPlayer.search.search();
+    }
+  }
+  function getUrlVars() {
+    var vars = [], hash;
+      var hashes = window.location.href.slice(window.location.href.indexOf('#') + 1).split('&');
+      for (var i = 0; i < hashes.length; i++) {
+        hash = hashes[i].split('=');
+        vars.push(hash[0]);
+        vars[hash[0]] = hash[1];
+      }
+      return vars;
+    }
+
+  </script>
+
+  <style>
+  div.jp-type-playlist {
+    border-radius: 6px;
+    border-color: black;
+
+  }
+  body {
+    /*background-color: #d6d6d6;*/
+    background-color: #eee;
+  }
+  </style>
+</head>
+<body>
+<div id="jquery_jplayer_1" class="jp-jplayer"></div>
+<div class="player">
+<div id="jp_container_1" class="jp-audio">
+  <div class="jp-type-playlist">
+    <div class="jp-gui jp-interface">
+      <div class='song-title'>
+        <div id="current_play_title"></div>
+      </div>
+      <ul class="jp-controls">
+        <li><a href="javascript:;" class="jp-previous" tabindex="1">previous</a></li>
+        <li><a href="javascript:;" class="jp-play" tabindex="1">play</a></li>
+        <li><a href="javascript:;" class="jp-pause" tabindex="1">pause</a></li>
+        <li><a href="javascript:;" class="jp-next" tabindex="1">next</a></li>
+        <li><a href="javascript:;" class="jp-stop" tabindex="1">stop</a></li>
+        <li><a href="javascript:;" class="jp-mute" tabindex="1" title="mute">mute</a></li>
+        <li><a href="javascript:;" class="jp-unmute" tabindex="1" title="unmute">unmute</a></li>
+        <li><a href="javascript:;" class="jp-volume-max" tabindex="1" title="max volume">max volume</a></li>
+      </ul>
+      <div class="jp-progress">
+        <div class="jp-seek-bar">
+          <div class="jp-play-bar"></div>
+
+        </div>
+      </div>
+      <div class="jp-volume-bar">
+        <div class="jp-volume-bar-value"></div>
+      </div>
+      <div class="jp-time-holder">
+        <div class="jp-current-time"></div>
+        <!--<div class="jp-duration"></div>-->
+      </div>
+      <ul class="jp-toggles">
+        <li><a href="javascript:;" class="jp-shuffle" tabindex="1" title="shuffle">shuffle</a></li>
+        <li><a href="javascript:;" class="jp-shuffle-off" tabindex="1" title="shuffle off">shuffle off</a></li>
+        <li><a href="javascript:;" class="jp-repeat" tabindex="1" title="repeat">repeat</a></li>
+        <li><a href="javascript:;" class="jp-repeat-off" tabindex="1" title="repeat off">repeat off</a></li>
+      </ul>
+    </div>
+    <div class="jp-playlist" id="tab_user_playlist">
+      <ul>
+        <li></li>
+      </ul>
+    </div>
+  </div>
+</div>
+</div>
+</body>
+</html>
